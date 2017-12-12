@@ -12,6 +12,7 @@
 // Global Variable
 bool enableService = false;
 
+// ROS Service Call "enable"
 bool enable(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res){
   if (req.data == true){
     enableService = true;
@@ -21,17 +22,14 @@ bool enable(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res){
   return enableService;
 }
 
-class Obstacle {
+// Class to provide information on object
+class ObjectMonitor {
   public:
-    Obstacle(geometry_msgs::Vector3 message) : message(message){}
-    geometry_msgs::Vector3 message;
-};
-
-class ObstacleMonitor {
-  public:
-    ObstacleMonitor(const ros::Publisher& pub, const ros::Publisher& pubPosition) : distance_pub(pub), position_pub(pubPosition){
+    ObjectMonitor(const ros::Publisher& displacement_publisher, const ros::Publisher& position_publisher) : distance_pub_object(displacement_publisher), position_pub_object(position_publisher){
     }
-    void ModelStatesCallback(const gazebo_msgs::ModelStates::ConstPtr& msg){
+
+    // Function that subscribes to /gazebo_msgs/model_states and publishes calculated object information
+    void modelStatesCallback(const gazebo_msgs::ModelStates::ConstPtr& msg){
 	
       double object_x = msg->pose[1].position.x;
       double object_y = msg->pose[1].position.y;
@@ -41,22 +39,23 @@ class ObstacleMonitor {
       double turtlebot_y = msg->pose[2].position.y;
       double turtlebot_z = msg->pose[2].position.z;
 
-      geometry_msgs::Vector3 test = displacementFunction(object_x, object_y, object_z, turtlebot_x, turtlebot_y, turtlebot_z);
+      geometry_msgs::Vector3 displacement_topic_info = displacementFunction(object_x, object_y, object_z, turtlebot_x, turtlebot_y, turtlebot_z);
       
       // Publish displacement topic information
-      distance_pub.publish(test);
+      distance_pub_object.publish(displacement_topic_info);
 
       if (enableService == true){
         // Publish new position
-        gazebo_msgs::ModelState testP = setPosition(object_x, object_y);
-        position_pub.publish(testP);
+        gazebo_msgs::ModelState position_info = setPosition(object_x, object_y);
+        position_pub_object.publish(position_info);
       }
     }
 
   private:
-    ros::Publisher distance_pub;
-    ros::Publisher position_pub;
+    ros::Publisher distance_pub_object;
+    ros::Publisher position_pub_object;
 
+    // Function to calculate displacement information
     geometry_msgs::Vector3 displacementFunction (double object_x, double object_y, double object_z, double turtlebot_x, double turtlebot_y, double turtlebot_z){
       geometry_msgs::Vector3 result;
       result.x = object_x - turtlebot_x;
@@ -65,6 +64,7 @@ class ObstacleMonitor {
       return result;
     }
 
+    // Function to set turtlebot's new position
     gazebo_msgs::ModelState setPosition (double x, double y){
       gazebo_msgs::ModelState position;
       position.model_name = "mobile_base";
@@ -79,18 +79,19 @@ int main(int argc, char **argv){
   ros::init(argc, argv, "seeker");
   ros::NodeHandle nh;
 	
-  // Create Publisher
-  ros::Publisher pub = nh.advertise<geometry_msgs::Vector3>("displacement", 1);
+  // Create displacement publisher
+  ros::Publisher displacement_publisher = nh.advertise<geometry_msgs::Vector3>("displacement", 1);
 
-  ros::Publisher pubPosition = nh.advertise<gazebo_msgs::ModelState>("gazebo/set_model_state", 1);
+  // Create position publisher
+  ros::Publisher position_publisher = nh.advertise<gazebo_msgs::ModelState>("gazebo/set_model_state", 1);
 
   // Create Service Server
   ros::ServiceServer service = nh.advertiseService("enable", enable);
 
-  ObstacleMonitor monitor(pub, pubPosition);
+  ObjectMonitor monitor(displacement_publisher, position_publisher);
 
   // Create Subscriber
-  ros::Subscriber sub = nh.subscribe("/gazebo/model_states", 1, &ObstacleMonitor::ModelStatesCallback, &monitor);
+  ros::Subscriber sub = nh.subscribe("/gazebo/model_states", 1, &ObjectMonitor::modelStatesCallback, &monitor);
 
   ROS_INFO("Displacement: ");
 
